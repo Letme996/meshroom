@@ -66,7 +66,7 @@ FloatingPane {
                 MaterialLabel { text: MaterialIcons.grain; padding: 2 }
                 RowLayout {
                     Slider {
-                        Layout.fillWidth: true; from: 0; to: 5; stepSize: 0.1
+                        Layout.fillWidth: true; from: 0; to: 5; stepSize: 0.001
                         value: Viewer3DSettings.pointSize
                         onValueChanged: Viewer3DSettings.pointSize = value
                         ToolTip.text: "Point Size: " + value.toFixed(2)
@@ -281,6 +281,38 @@ FloatingPane {
                                     modifiers = mouse.modifiers;
                                     mouse.accepted = false;
                                 }
+                            }
+                        }
+
+                        // BoundingBox visibility (if meshing node)
+                        MaterialToolButton {
+                            visible: model.hasBoundingBox
+                            enabled: model.visible
+                            Layout.alignment: Qt.AlignTop
+                            Layout.fillHeight: true
+                            text: MaterialIcons.transform
+                            font.pointSize: 10
+                            ToolTip.text: model.displayBoundingBox ? "Hide BBox" : "Show BBox"
+                            flat: true
+                            opacity: model.visible ? (model.displayBoundingBox ? 1.0 : 0.6) : 0.6
+                            onClicked: {
+                                model.displayBoundingBox = !model.displayBoundingBox
+                            }
+                        }
+
+                        // Transform visibility (if SfMTransform node)
+                        MaterialToolButton {
+                            visible: model.hasTransform
+                            enabled: model.visible
+                            Layout.alignment: Qt.AlignTop
+                            Layout.fillHeight: true
+                            text: MaterialIcons._3d_rotation
+                            font.pointSize: 10
+                            ToolTip.text: model.displayTransform ? "Hide Gizmo" : "Show Gizmo"
+                            flat: true
+                            opacity: model.visible ? (model.displayTransform ? 1.0 : 0.6) : 0.6
+                            onClicked: {
+                                model.displayTransform = !model.displayTransform
                             }
                         }
 

@@ -10,17 +10,23 @@ class DepthMapFilter(desc.CommandLineNode):
     parallelization = desc.Parallelization(blockSize=10)
     commandLineRange = '--rangeStart {rangeStart} --rangeSize {rangeBlockSize}'
 
+    category = 'Dense Reconstruction'
+    documentation = '''
+Filter depth map values that are not coherent in multiple depth maps.
+This allows to filter unstable points before starting the fusion of all depth maps in the Meshing node.
+'''
+
     inputs = [
         desc.File(
             name='input',
-            label='Input',
+            label='SfMData',
             description='SfMData file.',
             value='',
             uid=[0],
         ),    
         desc.File(
             name="depthMapsFolder",
-            label="Depth Maps Folder",
+            label="DepthMaps Folder",
             description="Input depth maps folder",
             value="",
             uid=[0],
@@ -108,7 +114,7 @@ class DepthMapFilter(desc.CommandLineNode):
     outputs = [
         desc.File(
             name='output',
-            label='Output',
+            label='Filtered DepthMaps Folder',
             description='Output folder for generated depth maps.',
             value=desc.Node.internalFolder,
             uid=[],

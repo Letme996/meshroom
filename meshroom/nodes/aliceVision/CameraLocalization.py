@@ -7,6 +7,8 @@ from meshroom.core import desc
 class CameraLocalization(desc.CommandLineNode):
     commandLine = 'aliceVision_cameraLocalization {allParams}'
 
+    category = 'Utils'
+
     inputs = [
         desc.File(
             name='sfmdata',
@@ -41,7 +43,7 @@ class CameraLocalization(desc.CommandLineNode):
             label='Match Desc Types',
             description='''Describer types to use for the matching.''',
             value=['sift'],
-            values=['sift', 'sift_float', 'sift_upright', 'akaze', 'akaze_liop', 'akaze_mldb', 'cctag3', 'cctag4', 'sift_ocv', 'akaze_ocv'],
+            values=['sift', 'sift_float', 'sift_upright', 'dspsift', 'akaze', 'akaze_liop', 'akaze_mldb', 'cctag3', 'cctag4', 'sift_ocv', 'akaze_ocv'],
             exclusive=False,
             uid=[0],
             joinChar=',',

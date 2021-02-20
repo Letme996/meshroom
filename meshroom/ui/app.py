@@ -2,19 +2,23 @@ import logging
 import os
 import argparse
 
-from PySide2.QtCore import Qt, QUrl, Slot, QJsonValue, Property, qInstallMessageHandler, QtMsgType
+from PySide2.QtCore import Qt, QUrl, Slot, QJsonValue, Property, Signal, qInstallMessageHandler, QtMsgType, QSettings
 from PySide2.QtGui import QIcon
 from PySide2.QtWidgets import QApplication
 
 import meshroom
 from meshroom.core import nodesDesc
+from meshroom.core import pyCompatibility
+from meshroom.core.taskManager import TaskManager
+
 from meshroom.ui import components
 from meshroom.ui.components.clipboard import ClipboardHelper
 from meshroom.ui.components.filepath import FilepathHelper
-from meshroom.ui.components.scene3D import Scene3DHelper
+from meshroom.ui.components.scene3D import Scene3DHelper, Transformations3DHelper
 from meshroom.ui.palette import PaletteManager
 from meshroom.ui.reconstruction import Reconstruction
 from meshroom.ui.utils import QmlInstantEngine
+from meshroom.ui import commands
 
 
 class MessageHandler(object):
@@ -65,16 +69,31 @@ class MeshroomApp(QApplication):
                             help='Import images or folder with images to reconstruct.')
         parser.add_argument('-I', '--importRecursive', metavar='FOLDERS', type=str, nargs='*',
                             help='Import images to reconstruct from specified folder and sub-folders.')
-        parser.add_argument('-p', '--pipeline', metavar='MESHROOM_FILE', type=str, required=False,
+        parser.add_argument('-s', '--save', metavar='PROJECT.mg', type=str, default='',
+                            help='Save the created scene.')
+        parser.add_argument('-p', '--pipeline', metavar='MESHROOM_FILE/photogrammetry/panoramaHdr/panoramaFisheyeHdr', type=str, default=os.environ.get("MESHROOM_DEFAULT_PIPELINE", "photogrammetry"),
                             help='Override the default Meshroom pipeline with this external graph.')
+        parser.add_argument("--verbose", help="Verbosity level", default='warning',
+                            choices=['fatal', 'error', 'warning', 'info', 'debug', 'trace'],)
 
         args = parser.parse_args(args[1:])
+
+        logStringToPython = {
+            'fatal': logging.FATAL,
+            'error': logging.ERROR,
+            'warning': logging.WARNING,
+            'info': logging.INFO,
+            'debug': logging.DEBUG,
+            'trace': logging.DEBUG,
+        }
+        logging.getLogger().setLevel(logStringToPython[args.verbose])
+
+        QApplication.setAttribute(Qt.AA_EnableHighDpiScaling)
 
         super(MeshroomApp, self).__init__(QtArgs)
 
         self.setOrganizationName('AliceVision')
         self.setApplicationName('Meshroom')
-        self.setAttribute(Qt.AA_EnableHighDpiScaling)
         self.setApplicationVersion(meshroom.__version_name__)
 
         font = self.font()
@@ -98,10 +117,12 @@ class MeshroomApp(QApplication):
         components.registerTypes()
 
         # expose available node types that can be instantiated
-        self.engine.rootContext().setContextProperty("_nodeTypes", sorted(nodesDesc.keys()))
+        self.engine.rootContext().setContextProperty("_nodeTypes", {n: {"category": nodesDesc[n].category} for n in sorted(nodesDesc.keys())})
 
         # instantiate Reconstruction object
-        r = Reconstruction(parent=self)
+        self._undoStack = commands.UndoStack(self)
+        self._taskManager = TaskManager(self)
+        r = Reconstruction(undoStack=self._undoStack, taskManager=self._taskManager, defaultPipeline=args.pipeline, parent=self)
         self.engine.rootContext().setContextProperty("_reconstruction", r)
 
         # those helpers should be available from QML Utils module as singletons, but:
@@ -110,6 +131,7 @@ class MeshroomApp(QApplication):
         # => expose them as context properties instead
         self.engine.rootContext().setContextProperty("Filepath", FilepathHelper(parent=self))
         self.engine.rootContext().setContextProperty("Scene3DHelper", Scene3DHelper(parent=self))
+        self.engine.rootContext().setContextProperty("Transformations3DHelper", Transformations3DHelper(parent=self))
         self.engine.rootContext().setContextProperty("Clipboard", ClipboardHelper(parent=self))
 
         # additional context properties
@@ -119,15 +141,6 @@ class MeshroomApp(QApplication):
         # request any potential computation to stop on exit
         self.aboutToQuit.connect(r.stopChildThreads)
 
-        if args.pipeline:
-            # the pipeline from the command line has the priority
-            r.setDefaultPipeline(args.pipeline)
-        else:
-            # consider the environment variable
-            defaultPipeline = os.environ.get("MESHROOM_DEFAULT_PIPELINE", "")
-            if defaultPipeline:
-                r.setDefaultPipeline(args.pipeline)
-
         if args.project and not os.path.isfile(args.project):
             raise RuntimeError(
                 "Meshroom Command Line Error: 'PROJECT' argument should be a Meshroom project file (.mg).\n"
@@ -135,6 +148,9 @@ class MeshroomApp(QApplication):
 
         if args.project:
             r.load(args.project)
+            self.addRecentProjectFile(args.project)
+        else:
+            r.new()
 
         # import is a python keyword, so we have to access the attribute by a string
         if getattr(args, "import", None):
@@ -143,7 +159,112 @@ class MeshroomApp(QApplication):
         if args.importRecursive:
             r.importImagesFromFolder(args.importRecursive, recursive=True)
 
+        if args.save:
+            if os.path.isfile(args.save):
+                raise RuntimeError(
+                    "Meshroom Command Line Error: Cannot save the new Meshroom project as the file (.mg) already exists.\n"
+                    "Invalid value: '{}'".format(args.save))
+            projectFolder = os.path.dirname(args.save)
+            if not os.path.isdir(projectFolder):
+                if not os.path.isdir(os.path.dirname(projectFolder)):
+                    raise RuntimeError(
+                        "Meshroom Command Line Error: Cannot save the new Meshroom project file (.mg) as the parent of the folder does not exists.\n"
+                        "Invalid value: '{}'".format(args.save))
+                os.mkdir(projectFolder)
+            r.saveAs(args.save)
+            self.addRecentProjectFile(args.save)
+
         self.engine.load(os.path.normpath(url))
+
+    def _recentProjectFiles(self):
+        projects = []
+        settings = QSettings()
+        settings.beginGroup("RecentFiles")
+        size = settings.beginReadArray("Projects")
+        for i in range(size):
+            settings.setArrayIndex(i)
+            p = settings.value("filepath")
+            if p:
+                projects.append(p)
+        settings.endArray()
+        return projects
+
+    @Slot(str)
+    @Slot(QUrl)
+    def addRecentProjectFile(self, projectFile):
+        if not isinstance(projectFile, (QUrl, pyCompatibility.basestring)):
+            raise TypeError("Unexpected data type: {}".format(projectFile.__class__))
+        if isinstance(projectFile, QUrl):
+            projectFileNorm = projectFile.toLocalFile()
+            if not projectFileNorm:
+                projectFileNorm = projectFile.toString()
+        else:
+            projectFileNorm = QUrl(projectFile).toLocalFile()
+            if not projectFileNorm:
+                projectFileNorm = QUrl.fromLocalFile(projectFile).toLocalFile()
+
+        projects = self._recentProjectFiles()
+
+        # remove duplicates while preserving order
+        from collections import OrderedDict
+        uniqueProjects = OrderedDict.fromkeys(projects)
+        projects = list(uniqueProjects)
+        # remove previous usage of the value
+        if projectFileNorm in uniqueProjects:
+            projects.remove(projectFileNorm)
+        # add the new value in the first place
+        projects.insert(0, projectFileNorm)
+
+        # keep only the 10 first elements
+        projects = projects[0:20]
+
+        settings = QSettings()
+        settings.beginGroup("RecentFiles")
+        size = settings.beginWriteArray("Projects")
+        for i, p in enumerate(projects):
+            settings.setArrayIndex(i)
+            settings.setValue("filepath", p)
+        settings.endArray()
+        settings.sync()
+
+        self.recentProjectFilesChanged.emit()
+
+    @Slot(str)
+    @Slot(QUrl)
+    def removeRecentProjectFile(self, projectFile):
+        if not isinstance(projectFile, (QUrl, pyCompatibility.basestring)):
+            raise TypeError("Unexpected data type: {}".format(projectFile.__class__))
+        if isinstance(projectFile, QUrl):
+            projectFileNorm = projectFile.toLocalFile()
+            if not projectFileNorm:
+                projectFileNorm = projectFile.toString()
+        else:
+            projectFileNorm = QUrl(projectFile).toLocalFile()
+            if not projectFileNorm:
+                projectFileNorm = QUrl.fromLocalFile(projectFile).toLocalFile()
+
+        projects = self._recentProjectFiles()
+
+        # remove duplicates while preserving order
+        from collections import OrderedDict
+        uniqueProjects = OrderedDict.fromkeys(projects)
+        projects = list(uniqueProjects)
+        # remove previous usage of the value
+        if projectFileNorm not in uniqueProjects:
+            return
+
+        projects.remove(projectFileNorm)
+
+        settings = QSettings()
+        settings.beginGroup("RecentFiles")
+        size = settings.beginWriteArray("Projects")
+        for i, p in enumerate(projects):
+            settings.setArrayIndex(i)
+            settings.setValue("filepath", p)
+        settings.endArray()
+        settings.sync()
+
+        self.recentProjectFilesChanged.emit()
 
     @Slot(str, result=str)
     def markdownToHtml(self, md):
@@ -194,3 +315,7 @@ class MeshroomApp(QApplication):
                 "onlineUrl": "https://raw.githubusercontent.com/alicevision/AliceVision/develop/COPYING.md"
             }
         ]
+
+    recentProjectFilesChanged = Signal()
+    recentProjectFiles = Property("QVariantList", _recentProjectFiles, notify=recentProjectFilesChanged)
+

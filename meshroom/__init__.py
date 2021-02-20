@@ -1,10 +1,11 @@
-__version__ = "2019.2.0"
+__version__ = "2020.1.1"
 __version_name__ = __version__
 
+from distutils import util
+from enum import Enum
+import logging
 import os
 import sys
-import logging
-from enum import Enum
 
 # sys.frozen is initialized by cx_Freeze and identifies a release package
 isFrozen = getattr(sys, "frozen", False)
@@ -20,6 +21,8 @@ if not isFrozen:
 
 # Allow override from env variable
 __version_name__ = os.environ.get("REZ_MESHROOM_VERSION", __version_name__)
+
+useMultiChunks = util.strtobool(os.environ.get("MESHROOM_USE_MULTI_CHUNKS", "True"))
 
 
 class Backend(Enum):
@@ -75,7 +78,12 @@ def setupEnvironment():
         if not isinstance(val, (list, tuple)):
             val = [val]
 
-        paths[index:index] = val
+        if index == -1:
+            paths.extend(val)
+        elif index == 0:
+            paths = val + paths
+        else:
+            raise ValueError("addToEnvPath: index must be -1 or 0.")
         os.environ[var] = os.pathsep.join(paths)
 
     # setup root directory (override possible by setting "MESHROOM_INSTALL_DIR" environment variable)

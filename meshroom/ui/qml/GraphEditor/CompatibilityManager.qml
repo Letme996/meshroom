@@ -16,7 +16,7 @@ MessageDialog {
     // alias to underlying compatibilityNodes model
     readonly property var nodesModel: uigraph.graph.compatibilityNodes
     // the total number of compatibility issues
-    readonly property int issueCount: nodesModel.count
+    readonly property int issueCount: (nodesModel != undefined) ? nodesModel.count : 0
     // the number of CompatibilityNodes that can be upgraded
     readonly property int upgradableCount: {
         var count = 0
@@ -91,15 +91,15 @@ MessageDialog {
 
                 Label {
                     Layout.preferredWidth: 130
-                    text: compatibilityNodeDelegate.node.nodeType
+                    text: compatibilityNodeDelegate.node ? compatibilityNodeDelegate.node.nodeType : ""
                 }
                 Label {
                     Layout.fillWidth: true
-                    text: compatibilityNodeDelegate.node.issueDetails
+                    text: compatibilityNodeDelegate.node ? compatibilityNodeDelegate.node.issueDetails : ""
                 }
                 Label {
-                    text: compatibilityNodeDelegate.node.canUpgrade ? MaterialIcons.check : MaterialIcons.clear
-                    color: compatibilityNodeDelegate.node.canUpgrade ? "#4CAF50" : "#F44336"
+                    text: compatibilityNodeDelegate.node && compatibilityNodeDelegate.node.canUpgrade ? MaterialIcons.check : MaterialIcons.clear
+                    color: compatibilityNodeDelegate.node && compatibilityNodeDelegate.node.canUpgrade ? "#4CAF50" : "#F44336"
                     font.family: MaterialIcons.fontFamily
                     font.pointSize: 14
                     font.bold: true

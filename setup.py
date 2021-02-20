@@ -6,6 +6,8 @@ from cx_Freeze import setup, Executable
 import meshroom
 
 
+currentDir = os.path.dirname(os.path.abspath(__file__))
+
 class PlatformExecutable(Executable):
     """
     Extend cx_Freeze.Executable to handle platform variations.
@@ -32,7 +34,6 @@ class PlatformExecutable(Executable):
         # get icon for platform if defined
         icon = icons.get(platform.system(), None) if icons else None
         if platform.system() in (self.Linux, self.Darwin):
-            currentDir = os.path.dirname(os.path.abspath(__file__))
             initScript = os.path.join(currentDir, "setupInitScriptUnix.py")
         super(PlatformExecutable, self).__init__(script, initScript, base, targetName, icon, shortcutName,
                                                  shortcutDir, copyright, trademarks)
@@ -41,8 +42,16 @@ class PlatformExecutable(Executable):
 build_exe_options = {
     # include dynamically loaded plugins
     "packages": ["meshroom.nodes", "meshroom.submitters"],
+    "includes": [
+        "idna.idnadata",  # Dependency needed by SketchfabUpload node, but not detected by cx_Freeze
+    ],
     "include_files": ["CHANGES.md", "COPYING.md", "LICENSE-MPL2.md", "README.md"]
 }
+if os.path.isdir(os.path.join(currentDir, "tractor")):
+    build_exe_options["packages"].append("tractor")
+if os.path.isdir(os.path.join(currentDir, "simpleFarm")):
+    build_exe_options["packages"].append("simpleFarm")
+
 
 if platform.system() == PlatformExecutable.Linux:
     # include required system libs
